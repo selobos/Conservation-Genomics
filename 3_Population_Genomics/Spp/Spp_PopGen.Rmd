@@ -1,0 +1,167 @@
+---
+title: "Population Genomics - Multispecies plots"
+author: "Simon E. Lobos"
+date: "November, 2026"
+output: html_document
+---
+
+Import packages
+```{r include = TRUE, message=FALSE, eval = FALSE}
+library(dplyr)
+library(magrittr)
+library(ggplot2)
+library(hrbrthemes)
+library(RColorBrewer)
+library(ggrepel)
+library(tidyr)
+library(forcats)
+```
+
+Import data
+```{r }
+#Set directory
+setwd("~/Desktop/Conservation_Genomics/3_Population_Genomics/Spp")
+```
+
+Distribution of pairwise genomic differentiation (FST) within each of the nine species (Figure 2)
+```{r }
+## Load Fst----
+BM <- read.csv("~/Desktop/Conservation_Genomics/3_Population_Genomics/BM/BM_PairwiseFst_ns.csv", check.names = FALSE, row.names=1) %>% as.matrix(.)
+CR <- read.csv("~/Desktop/Conservation_Genomics/3_Population_Genomics/CR/CR_PairwiseFst_ns.csv", check.names = FALSE, row.names=1) %>% as.matrix(.)
+CX <- read.csv("~/Desktop/Conservation_Genomics/3_Population_Genomics/CX/CX_PairwiseFst_ns.csv", check.names = FALSE, row.names=1) %>% as.matrix(.)
+EI <- read.csv("~/Desktop/Conservation_Genomics/3_Population_Genomics/EI/EI_PairwiseFst_ns.csv", check.names = FALSE, row.names=1) %>% as.matrix(.)
+EO <- read.csv("~/Desktop/Conservation_Genomics/3_Population_Genomics/EO/EO_PairwiseFst_ns.csv", check.names = FALSE, row.names=1) %>% as.matrix(.)
+GA <- read.csv("~/Desktop/Conservation_Genomics/3_Population_Genomics/GA/GA_PairwiseFst_ns.csv", check.names = FALSE, row.names=1) %>% as.matrix(.)
+LC <- read.csv("~/Desktop/Conservation_Genomics/3_Population_Genomics/LC/LC_PairwiseFst_ns.csv", check.names = FALSE, row.names=1) %>% as.matrix(.)
+SC <- read.csv("~/Desktop/Conservation_Genomics/3_Population_Genomics/SC/SC_PairwiseFst_ns.csv", check.names = FALSE, row.names=1) %>% as.matrix(.)
+XA <- read.csv("~/Desktop/Conservation_Genomics/3_Population_Genomics/XA/XA_PairwiseFst_ns.csv", check.names = FALSE, row.names=1) %>% as.matrix(.)
+
+##remove top half of matrix (including diagonal)
+BM[upper.tri(BM, diag=TRUE)] <- NA 
+CR[upper.tri(CR, diag=TRUE)] <- NA
+CX[upper.tri(CX, diag=TRUE)] <- NA
+EI[upper.tri(EI, diag=TRUE)] <- NA
+EO[upper.tri(EO, diag=TRUE)] <- NA
+GA[upper.tri(GA, diag=TRUE)] <- NA
+LC[upper.tri(LC, diag=TRUE)] <- NA
+SC[upper.tri(SC, diag=TRUE)] <- NA
+XA[upper.tri(XA, diag=TRUE)] <- NA
+
+#Linearize the distance matrix
+BM.melt <- reshape2::melt(BM) %>% set_colnames(., c('Pop1','Pop2','Fst')) %>% mutate(Spp = "BM",  Fst.Global ="0.09")
+CR.melt <- reshape2::melt(CR) %>% set_colnames(., c('Pop1','Pop2','Fst')) %>% mutate(Spp = "CR",  Fst.Global ="0.05")
+CX.melt <- reshape2::melt(CX) %>% set_colnames(., c('Pop1','Pop2','Fst')) %>% mutate(Spp = "CX",  Fst.Global ="0.07")
+EI.melt <- reshape2::melt(EI) %>% set_colnames(., c('Pop1','Pop2','Fst')) %>% mutate(Spp = "EI",  Fst.Global ="0.04")
+EO.melt <- reshape2::melt(EO) %>% set_colnames(., c('Pop1','Pop2','Fst')) %>% mutate(Spp = "EO",  Fst.Global ="0.03")
+GA.melt <- reshape2::melt(GA) %>% set_colnames(., c('Pop1','Pop2','Fst')) %>% mutate(Spp = "GA",  Fst.Global ="0.09")
+LC.melt <- reshape2::melt(LC) %>% set_colnames(., c('Pop1','Pop2','Fst')) %>% mutate(Spp = "LC",  Fst.Global ="0.05")
+SC.melt <- reshape2::melt(SC) %>% set_colnames(., c('Pop1','Pop2','Fst')) %>% mutate(Spp = "SC",  Fst.Global ="0.05")
+XA.melt <- reshape2::melt(XA) %>% set_colnames(., c('Pop1','Pop2','Fst'))%>% mutate(Spp = "XA",  Fst.Global ="0.03")
+
+Fst.spp <- rbind(BM.melt, CR.melt, CX.melt, EI.melt, EO.melt, GA.melt, LC.melt, SC.melt, XA.melt)
+write.csv(Fst.spp, file="Fst.spp.Ch1.csv")
+
+#load significant Fst
+Fst.sig.spp <- read.csv("Fst.spp.significant.Ch1.csv")
+
+#Violin Plot Fst----
+
+# Modify the factor levels (facet labels)
+Fst.sig.spp$Spp <- factor(Fst.sig.spp$Spp, levels = c("BM","CR", "CX", "EI", "EO", "GA", "LC", "SC", "XA"), 
+                 labels = c("Banksia","Callitris","Correa",
+                            "Epacris","Eucalyptus","Grevillea",
+                            "Leptospermum","Stenanthera","Xanthorrhoea"))
+
+#Set up colour pallete
+pal7 <- colorRampPalette(brewer.pal(9,"RdYlBu"))(100)
+
+Fst.sig.spp %>%                  
+  filter( Fst != 'NA') %>% 
+  mutate(Spp = fct_reorder(Spp, as.numeric(Fst.Global), .fun = median)) %>%
+ggplot(aes(x=Spp, y=Fst, fill=as.numeric(Fst.Global))) + 
+  geom_violin(trim=FALSE)+
+   geom_boxplot(width=0.1, fill="white", alpha=0.5)+
+  scale_fill_gradientn(colours = rev(pal7)) +
+  ylab("") +
+  xlab('Species') +
+  theme_minimal() +
+  theme(legend.title=element_text(size=18, face="plain"),
+        legend.position="bottom", legend.box = "horizontal",
+        legend.text=element_text(size=10, face="plain"), 
+        axis.text.x = element_text(colour="black",angle = 55, 
+                                   vjust = 0.5, hjust = 0.5, face = "italic", size=18),
+        axis.text.y = element_text(colour="black",size=18,face="plain"),
+        axis.title.x = element_text(colour="black",size=18,face="plain"),
+        axis.title.y = element_text(colour="black",size=18,face="plain")) +
+guides(fill = guide_colorbar(title = expression(paste("F",italic("ST"))),
+                             label.position = "bottom",
+                             title.position = "left", title.vjust = 0.8,
+                             frame.colour = "black",
+                             barwidth = 10,
+                             barheight = 1.5,
+                             ticks.colour = "grey30")) 
+
+ggsave(file = "Ch1_Violin.Global.Fst.sig.pdf", width = 7, height = 7, dpi = 300)
+```
+
+Comparison of within-population genetic diversity parameters for each of the nine species (Figure 3)
+```{r He, Ho, Fis 2}
+fis_he_ho_ns <- read.csv("Spp_fis_he_ho_ns.csv")
+
+hetlab.o = expression(italic("H")[o])
+hetlab.e = expression(italic("H")[e])
+
+# Modify the factor levels (facet labels)
+fis_he_ho_ns$Spp <- factor(fis_he_ho_ns$Spp, levels = c("BM","CR", "CX", "EI", "EO", "GA", "LC", "SC", "XA"), 
+                 labels = c("Banksia","Callitris","Correa",
+                            "Epacris","Eucalyptus","Grevillea",
+                            "Leptospermum","Stenanthera","Xanthorrhoea"))
+
+ggplot(fis_he_ho_ns, aes(exp_het, obs_het)) +
+  geom_point(colour = "black", 
+             fill = "#6baed6", 
+             shape = 21, 
+             size = 3, 
+             alpha = 0.8) +
+  #geom_point(mapping=aes(size=fis,
+  #                       alpha=0.5,
+  #                       fill=fis),
+  #           colour = "black",
+  #           shape=21) +
+  ylab(hetlab.o) + xlab(hetlab.e) +
+  theme_minimal() +
+  facet_wrap(~Spp) +
+  theme_minimal() +
+  theme(strip.text = element_text(face = "italic", size = 18),
+        legend.title=element_text(size=18, face="plain"),
+        legend.position="bottom", legend.box = "horizontal",
+        legend.text=element_text(size=10, face="plain"), 
+        axis.text.x = element_text(colour="black", 
+                                   vjust = 0.5, hjust = 0.5, size=18),
+        #plot.margin = margin(0.5, 1, 0.5, 0.5, "cm"),
+        #margin(t = 0, r = 0, b = 0, l = 0, unit = "pt")
+        axis.text.y = element_text(colour="black",size=18,face="plain"),
+        axis.title.x = element_text(colour="black",size=18,face="plain"),
+        axis.title.y = element_text(colour="black",size=18,face="plain")) +
+  guides(fill = guide_colorbar(title = expression(paste("F",italic("ST"))),
+                               label.position = "bottom",
+                               title.position = "left", title.vjust = 0.8,
+                               frame.colour = "black",
+                               barwidth = 10,
+                               barheight = 1.5,
+                               ticks.colour = "grey30")) +
+  #  geom_label_repel(aes(label = pop_new),
+  #                   color = "black", 
+  #                   fontface = "bold",
+  #                   segment.color = "grey30",
+  #                   segment.size = 1,
+  #                   min.segment.length = 0.1,
+  #                   na.rm = TRUE,
+  #                   show.legend = TRUE,
+  #                   max.overlaps = 70) + 
+  guides(alpha="none", size = "none")
+
+ggsave(file = "Ch1_Fis.He.Ho.spp.pdf", width = 9, height = 9, dpi = 300)
+ggsave(file = "Ch1_Fis.He.Ho.spp.labels.2.pdf", width = 10, height = 10, dpi = 300)
+```
+

@@ -1,0 +1,381 @@
+---
+title: "Population Genomics - Banksia marginata"
+author: "Simon E. Lobos"
+date: "November, 2026"
+output: html_document
+---
+
+Import packages
+```{r include = TRUE, message=FALSE, eval = FALSE}
+library(dartR)
+library(devtools)
+library(adegenet)
+library(hierfstat)
+library(PopGenReport)
+library(pegas)
+library(ape)
+library(ggplot2)
+library(diveRsity)
+library(dplyr)
+library(poppr)
+library(StAMPP)
+library(genepop)
+library(reshape)
+library(pheatmap)
+library(RColorBrewer)
+library(ggrepel)
+library(snpR)
+library(grid)
+library(tibble)
+```
+
+Import data
+```{r }
+#Set directory
+setwd("~/Desktop/Conservation_Genomics/3_Population_Genomics/BM")
+
+#Load genlight object
+load("~/Desktop/Conservation_Genomics/1_SNP_quality_control_filtering/BM/gle_BM.rdata")
+```
+
+```{r Convert Genlight to Genind to Hierstat}
+
+#Covert Genlight to Genind
+gi <- gl2gi(gle)
+save(gi, file="gi_BM.rdata")
+```
+
+```{r Weir and Cochrams Global Fst}
+#Convert Genind to Hierstat file (needed for bootstrapping)
+di <- genind2hierfstat(gi)
+wc(di)
+```
+
+```{r Calculate confidence intervals for Weir and Cochrams Global Fst}
+boot.vc(di[1], di[-1])$ci
+```
+
+```{r Calculate pairwise Fst (Weir and Cochrams)}
+PairwiseFst <- pairwise.WCfst(di)
+
+write.csv(PairwiseFst, "BM_PairwiseFst.csv")
+
+round(PairwiseFst, 3)
+```
+
+```{r Calculate confidence intervals for Pairwise Fst (Weir and Cochrams)}
+boot.ppfst(di)
+
+write.csv(boot.ppfst(di), file="boot.ppfst(di).csv")
+```
+
+```{r Estimating Population Structure - DAPC}
+
+#Perform a PCA to choose the number of PC in the DAPC:
+input_scaled = scaleGen (gi, center = TRUE, scale = TRUE, NA.method = "mean")
+pca_input = dudi.pca(input_scaled, center = TRUE, scannf = FALSE)
+
+#% of PC variation
+pc_pca = as.data.frame(pca_input$eig)
+pc_pca[,2] = (pc_pca/sum(pc_pca))*100
+
+#Rule of 100% of variance,number of PC to reach to 100% of explained variance
+index_100 = length(rownames(gi@tab))-1
+index_100 
+
+##Visualizing K- means clustering
+###Select the ’best’ BIC is often indicated by an below in the curve of BIC values as a function of k
+pdf("BM_DAPC_K_means_clustering.pdf", width=7.5, height=6)
+grp <- find.clusters(gi, max.n.clust=30, n.pca = index_100, stat="BIC")
+#Choose the number of clusters (>=2): 2
+dev.off()
+
+#Data frame with results 
+grp_df = as.data.frame(grp$Kstat)
+grp_df$K = c(1:30)
+colnames(grp_df) = c("BIC", "K")
+grp_df
+
+#Plot
+ggplot(grp_df, aes(x = K, y = BIC)) +
+  geom_line(color = "black", size = 0.25 ) +
+  #geom_segment(aes(x = K, y = min, xend = K, yend = max)) +
+  geom_point(shape = 21, size = 4, color = "black", fill = "#e5f5f9") +
+  geom_point(data=grp_df[1, ], aes(x = K, y = BIC), shape = 21, size = 4, color = "black", fill = "#2ca25f") +
+  scale_x_continuous(breaks = seq(1, 30, by = 1)) +
+  labs(x = "Number of Genetic Clusters", y = "BIC") +
+theme_bw() + theme(panel.border = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black"))+ theme(legend.position = "none")+
+  theme(legend.title=element_text(size=12, face="bold"), legend.title.align=0.5, 
+        legend.text=element_text(size=10, face="italic"), 
+        axis.line = element_line(colour = 'black', size = 1.25), 
+        axis.ticks = element_line(colour = 'black', size = 1.25),
+plot.title = element_text(color="black", size=20, face="bold.italic")) 
+#+ ggtitle("Banksia marginata")
+
+ggsave("BM_DAPC_K_means_clustering.pdf", width = 6, height = 3.5, dpi = 300)
+```
+
+```{r Number of clusters }
+#### Choose the number of cluster (Kstat) with the lowest value
+#### K=1
+grp$Kstat
+```
+
+```{r Perform DAPC}
+pdf("BM_DAPC_eigenvalues.pdf", width=7.5, height=6)
+dapc1 <- dapc(gi, grp$grp, n.pca=144)
+dev.off()
+```
+
+```{r Choosing the optimal number of PCs to retain}
+pdf("BM_DAPC_optim.a.score.pdf", width=7.5, height=6)
+optim.a.score(dapc1)->oa
+dev.off()
+```
+
+```{r Redo DAPC}
+###redo DAPC
+dapc2<-dapc(gi, grp$grp,n.pca=oa$best,n.da=3)
+
+##probability of membership
+summary(dapc2)
+```
+
+```{r Visualise DAPC}
+
+## DAPC scatter
+cols2 <- funky(2)
+pdf("BM_DAPC2_scatter.pdf", width=7.5, height=6)
+scatter(dapc2, posi.da="bottomright", bg="white", pch=20, cell=0, cstar=0, col=cols2, solid=.4,
+        cex=4,clab=0,scree.pca=TRUE,
+        posi.pca="topright")
+dev.off()
+```
+
+```{r Mean allelic richness per site}
+
+#Convert genind object into hierfstat format
+gh <- genind2hierfstat(gi) #convert genind object into hierfstat format
+
+#Calculate basic population genetic statistics for each locus
+basic_gi = basic.stats(gh, diploid=TRUE)
+basic_gi$overall
+
+#Calculate summaries -across loci!- from outpuut of Hierfstat
+n<-as.data.frame(basic_gi$n.ind.samp)
+n_locmean<-apply(n, FUN=mean,MARGIN=2,na.rm=T)#mean across loci
+n_sd<-apply(n, FUN=sd,MARGIN=2,na.rm=T)
+
+#remove NA#
+gle.imp <- gl.impute(gle, method="neighbour") 
+
+#Covert Genlight to Genind
+gi.imp <- gl2gi(gle.imp)
+save(gle.imp, file="gle.imp_BM.rdata")
+
+Richness <- allel.rich(gi.imp, min.alleles = NULL)
+
+Richness$alleles.sampled 
+```
+
+```{r Mean observed heterogeneity (Ho) per site}
+Ho_locmean <- apply(basic_gi$Ho, MARGIN = 2, FUN = mean, na.rm = TRUE) %>% round(digits = 2)
+
+Ho_sd<-apply(basic_gi$Ho, FUN=sd,MARGIN=2,na.rm=T) %>% round(digits = 2)
+```
+
+```{r  Mean expected heterogeneity (He) per site}
+Hs_locmean <- apply(basic_gi$Hs, MARGIN = 2, FUN = mean, na.rm = TRUE) %>% round(digits = 2)
+
+Hs_sd<-apply(basic_gi$Hs, FUN=sd,MARGIN=2,na.rm=T) %>% round(digits = 2)
+```
+
+```{r Visualise heterozygosity per site}
+
+#Create data frame of site names with Ho and He and convert into long format
+Het_locmean_df = data.frame(Site = names(Ho_locmean), Ho = Ho_locmean, He = Hs_locmean) %>%
+  melt(id.vars = "Site")
+write.csv(Het_locmean_df, file = "Het_BM_r2.csv")
+
+custom_theme = theme(
+  axis.text.x = element_text(size = 10, angle = 90, vjust = 0.5, face = "bold"),
+  axis.text.y = element_text(size = 10),
+  axis.title.y = element_text(size = 12),
+  axis.title.x = element_blank(),
+  axis.line.y = element_line(size = 0.5),
+  legend.title = element_blank(),
+  legend.text = element_text(size = 12),
+  panel.grid = element_blank(),
+  panel.background = element_blank(),
+  plot.title = element_text(hjust = 0.5, size = 15, face="bold")
+)
+
+
+# Italic label
+hetlab.o = expression(italic("H")[o])
+hetlab.e = expression(italic("H")[e])
+
+ggplot(data = Het_locmean_df, aes(x = Site, y = value, fill = variable))+
+  geom_bar(stat = "identity", position = position_dodge(width = 0.6), colour = "black")+
+  scale_y_continuous(expand = c(0,0), limits = c(0,0.50))+
+  scale_fill_manual(values = c("royalblue", "#bdbdbd"), labels = c(hetlab.o, hetlab.e))+
+  ylab("Heterozygosity")+
+  ggtitle("Banksia marginata")+
+  custom_theme
+
+ggsave("BM_Heterozygosity.pdf", width = 10, height = 6, dpi = 300)
+```
+
+```{r Calculate inbreeding coefficient (FIS)}
+Fis_locmean<-apply(basic_gi$Fis, FUN=mean,MARGIN=2,na.rm=T) %>% round(digits = 3)
+
+Fis_sd<-apply(basic_gi$Fis, FUN=sd,MARGIN=2,na.rm=T) %>% round(digits = 3)
+```
+
+```{r Plot FIS, Ho and He}
+fis = rownames_to_column(data.frame(apply(basic_gi$Fis, 2, mean, na.rm = TRUE)))
+names(fis) = c("pop", "fis")
+
+expected_het = rownames_to_column(data.frame(apply(basic_gi$Hs, 2, mean, na.rm = TRUE)))
+names(expected_het) = c("pop", "exp_het")
+
+obs_het = rownames_to_column(data.frame(apply(basic_gi$Ho, 2, mean, na.rm = TRUE)))
+names(obs_het) = c("pop", "obs_het")
+
+
+#Merge and write out new values
+
+fis_he_ho = left_join(fis, expected_het)
+
+fis_he_ho = left_join(fis_he_ho, obs_het)
+
+write.csv(fis_he_ho, file="fis_he_ho.csv")
+
+#read fis_he_ho with new pop names
+fis_he_ho_ns <- read.csv("fis_he_ho_ns.csv")
+
+plot(fis_he_ho_ns$exp_het~ fis_he_ho_ns$obs_het)
+plot(fis_he_ho_ns$fis~fis_he_ho_ns$obs_het)
+plot(fis_he_ho_ns$fis~fis_he_ho_ns$exp_het)
+
+hetlab.o = expression(italic("H")[o])
+hetlab.e = expression(italic("H")[e])
+
+ggplot(fis_he_ho_ns, aes(exp_het, obs_het)) +
+  geom_point(mapping=aes(size=fis,
+                         alpha=0.5,
+                         fill=fis),
+                         colour = "black",
+                         shape=21) +
+  scale_fill_gradient2(low = "#4575b4", 
+                       mid = "#fefcba", high = "#d73027", midpoint = 0.239) +
+  scale_color_distiller(palette = "RdYlBu") +
+  ylab(hetlab.o) + xlab(hetlab.e) +
+  theme_test() +
+  theme(axis.title.x = element_text(size = 18), 
+        axis.title.y = element_text(size = 18),
+        legend.position="bottom", legend.box = "horizontal",
+        legend.text=element_text(size=10, face="plain"), 
+        axis.text.x = element_text(colour="black", 
+                                   vjust = 0.5, hjust = 0.5, 
+                                   face = "plain", size=15),
+        axis.text.y = element_text(colour="black",size=15,face="plain"),) +
+  guides(fill = guide_colorbar(title = expression(paste("F",italic("IS"))),
+                               label.position = "bottom",
+                               title.position = "left", title.vjust = 0.8,
+                               frame.colour = "black",
+                               barwidth = 10,
+                               barheight = 1.5)) +
+  geom_label_repel(aes(label = pop_new),
+                   color = "black", 
+                   fontface = "bold",
+                   segment.color = "grey30",
+                   segment.size = 1,
+                   min.segment.length = 0.1,
+                   na.rm = TRUE,
+                   show.legend = TRUE) + 
+  guides(alpha="none", size = "none")
+
+ggsave("BM.fis_he_ho.pdf", height = 6, width = 6)
+```
+
+
+```{r Hi Diversity from betas function in hierfstats}
+
+#Calculate betas and extract Hi
+betas<-betas(gh)
+str(betas$Hi)
+
+Hi<-as.data.frame(betas$Hi)
+Hi_locmean<-apply(Hi, FUN=mean,MARGIN=1,na.rm=T)
+Hi_sd<-apply(Hi, FUN=sd,MARGIN=1,na.rm=T)
+
+#Summary table of mean across loci, per population
+div_summ<-as.data.frame(cbind(n_locmean,n_sd,Ho_locmean,Ho_sd,Hs_locmean,Hs_sd,Fis_locmean,Fis_sd,Hi_locmean,Hi_sd))
+str(div_summ)
+div_summ$Population<-rownames(div_summ)
+head(div_summ)
+write.csv(div_summ, file = "BM_summary_mean_loci_pop.csv")
+```
+
+```{r Plot Heatmap Pairwise Fst}
+
+fst.matrix <- read.csv("BM_PairwiseFst_ns.csv", check.names = FALSE, row.names=1)
+
+pdf("BM_PairwiseFst.pdf", height=4.65, width=6)
+ph <- pheatmap(fst.matrix, cluster_cols=T, cluster_rows=T, 
+         cutree_rows = 3,
+         fontsize_col=8, fontsize_row = 8, 
+         treeheight_col=0, 
+         clustering_method="ward.D2",
+         #display_numbers = TRUE, 
+         angle_col = 90,
+         cellwidth = 10, cellheight = 10)
+         #,color_branches = "white")
+dev.off()
+
+#Coloured branches of the dendrogram
+#ph$gtable$grobs[[1]]$gp <- gpar(col = 'white')
+
+#pdf("BM_PairwiseFst_2.pdf", height=4.65, width=6)
+#grid.newpage()
+#grid.draw(ph$gtable)
+#dev.off()
+
+#Make a Fst histogram to add on the heatmap
+dim(basic_gi$Hs)
+
+summary(basic_gi$Hs)
+summary(basic_gi$Fis)
+
+hist(basic_gi$perloc$Fst)
+fst_df = data.frame(basic_gi$perloc)
+
+ggplot(fst_df, aes(x = Fst)) +
+  geom_histogram(fill = "coral", color = "black", binwidth = 0.02) +
+  ylab("Frequency") +
+  xlab(expression(F["ST"]))
+
+# ggsave("figs_for_paper/fst_dist.pdf", height = 3, width = 5)
+```
+
+```{r Calculate the proportion of polymorphic loci per population}
+
+write.csv(gle.imp@pop, file="BM.gle.imp@pop.csv")
+
+pops <- read.csv("BM.gle.imp@pop.csv", header=F)
+
+pops <- pops$V1
+
+gi.imp@pop <- as.factor(pops) # make factor
+
+gs <- import.snpR.data(gi.imp)
+
+cal.poly <- calc_prop_poly(gs, c("pop"))
+polymor <- get.snpR.stats(cal.poly, c("pop"), stats = "prop_poly")$weighted.means
+
+write.csv(polymor, file="BM_prop_poly.csv")
+```
+
+
+
